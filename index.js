@@ -1,9 +1,40 @@
+const fs = require('fs');
 const puppeteer = require('puppeteer-extra');
 const StealthPlugin = require('puppeteer-extra-plugin-stealth');
 
 puppeteer.use(StealthPlugin());
 
 const DEFAULT_USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
+
+// Resolve Chrome executable in order of preference:
+//   1. PUPPETEER_EXECUTABLE_PATH env var (set in Docker/CI)
+//   2. Common system-installed Chrome/Chromium paths
+//   3. Puppeteer's own downloaded Chrome (falls back to its default)
+function resolveChromePath() {
+    if (process.env.PUPPETEER_EXECUTABLE_PATH) {
+        return process.env.PUPPETEER_EXECUTABLE_PATH;
+    }
+
+    const candidates = [
+        '/usr/bin/google-chrome-stable',
+        '/usr/bin/google-chrome',
+        '/usr/bin/chromium-browser',
+        '/usr/bin/chromium',
+        '/snap/bin/chromium',
+    ];
+
+    for (const candidate of candidates) {
+        try {
+            fs.accessSync(candidate, fs.constants.X_OK);
+            return candidate;
+        } catch {
+            // not found, try next
+        }
+    }
+
+    // Let Puppeteer use its own downloaded Chrome
+    return null;
+}
 
 class ApiExtractor {
     constructor() {
@@ -21,6 +52,11 @@ class ApiExtractor {
     async init(options = {}) {
         console.log('starting browser...');
 
+        const chromePath = options.executablePath || resolveChromePath();
+        if (chromePath) {
+            console.log('Using Chrome at:', chromePath);
+        }
+
         const defaultArgs = [
             '--no-sandbox',
             '--disable-setuid-sandbox',
@@ -37,6 +73,7 @@ class ApiExtractor {
 
         const puppeteerConfig = {
             headless: true,
+            ...(chromePath ? { executablePath: chromePath } : {}),
             ...options,
             args: options.args ? [...defaultArgs, ...options.args] : defaultArgs
         };
